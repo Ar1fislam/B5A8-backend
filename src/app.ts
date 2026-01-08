@@ -21,6 +21,7 @@ import paymentRoutes from './modules/payments/payment.routes'
 import adminRoutes from './modules/admin/admin.routes'
 import uploadRoutes from './modules/upload/upload.routes'
 import messageRoutes from './modules/messages/message.routes'
+import { paymentController } from './modules/payments/payment.controller'
 
 // Load environment variables
 dotenv.config()
@@ -61,12 +62,19 @@ app.use(
 )
 
 // Rate limiting
-const limiter = rateLimit({
+const limiter = rateLimit({ 
   windowMs: 1 * 60 * 60 * 1000, // 1 hour
   max: 1000, // limit each IP to 1000 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
 })
 app.use(limiter)
+
+//newc1
+app.post(
+  '/api/payments/webhook',
+  express.raw({ type: 'application/json' }),
+  paymentController.handleWebhook
+)
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }))

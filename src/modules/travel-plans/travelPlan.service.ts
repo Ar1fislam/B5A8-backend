@@ -1,0 +1,451 @@
+import { prisma } from '../../lib/prisma'
+import type { TravelPlanInput } from '../../utils/types'
+import { AppError } from '../../middleware/errorHandler'
+import type { Prisma } from '../../generated/prisma/client'
+
+export const travelPlanService = {
+  async createTravelPlan(userId: string, planData: TravelPlanInput) {
+    const {
+      destination,
+      startDate,
+      endDate,
+      budget,
+      travelType,
+      description,
+      isPublic,
+    } = planData
+
+    //newc1
+     const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, isPremium: true },
+  })
+
+  if (!user) throw new AppError(404, 'User not found')
+
+  // Admin or premium user can create
+  if (user.role === 'ADMIN' || user.isPremium) {
+    // create plan (
+  } else {
+    const sub = await prisma.subscription.findFirst({
+      where: {
+        userId,
+        currentPeriodEnd: { gt: new Date() },
+        status: { in: ['active', 'trialing'] }, // important
+      },
+    })
+    if (!sub) throw new AppError(403, 'Active subscription required to create plans')
+  }
+
+    // // Check Subscription Status
+    // const userSubscription = await prisma.subscription.findFirst({
+    //   where: { userId, currentPeriodEnd: { gt: new Date() } },
+    // })
+
+    // if (!userSubscription) {
+    //   throw new AppError(403, 'Active subscription required to create plans')
+    // }
+
+    const travelPlan = await prisma.travelPlan.create({
+      data: {
+        destination,
+        budget,
+        travelType,
+        description,
+        isPublic,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        userId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            profile: {
+              select: {
+                fullName: true,
+                profileImage: true,
+                currentLocation: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    return travelPlan
+  },
+
+  async getUserTravelPlans(
+    userId: string,
+    page: number = 1,
+    limit: number = 10
+  ) {
+    const skip = (page - 1) * limit
+
+    const [plans, total] = await Promise.all([
+      prisma.travelPlan.findMany({
+        where: { userId },
+        include: {
+          user: {
+            select: {
+              profile: {
+                select: {
+                  fullName: true,
+                  profileImage: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              matches: true,
+            },
+          },
+        },
+        orderBy: { startDate: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.travelPlan.count({
+        where: { userId },
+      }),
+    ])
+
+    return {
+      plans,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    }
+  },
+
+  async getTravelPlanById(planId: string, userId?: string) {
+    const travelPlan = await prisma.travelPlan.findUnique({
+      where: { id: planId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            profile: {
+              select: {
+                fullName: true,
+                profileImage: true,
+                bio: true,
+                currentLocation: true,
+                travelInterests: true,
+                visitedCountries: true,
+              },
+            },
+            reviewsReceived: {
+              include: {
+                author: {
+                  select: {
+                    profile: {
+                      select: {
+                        fullName: true,
+                      },
+                    },
+                  },
+                },
+              },
+              take: 5,
+            },
+            _count: {
+              select: {
+                reviewsReceived: true,
+                travelPlans: true,
+              },
+            },
+          },
+        },
+        matches: {
+          include: {
+            initiator: {
+              select: {
+                profile: {
+                  select: {
+                    fullName: true,
+                    profileImage: true,
+                  },
+                },
+              },
+            },
+          },
+          where: {
+            status: 'ACCEPTED',
+          },
+          take: 5,
+        },
+        tripPhotos: true,
+      },
+    })
+
+    if (!travelPlan) {
+      throw new AppError(404, 'Travel plan not found')
+    }
+
+    const savedTravelPlans = await prisma.savedTravelPlan.findMany({
+      where: { travelPlanId: planId },
+    })
+
+    const savedByMe = userId ? savedTravelPlans.length > 0 : false
+
+    return { ...travelPlan, savedByMe }
+  },
+
+  async updateTravelPlan(
+    planId: string,
+    userId: string,
+    updateData: Partial<TravelPlanInput>
+  ) {
+    const startDate = updateData.startDate
+    const endDate = updateData.endDate
+
+    // Check if plan exists and user owns it
+    const existingPlan = await prisma.travelPlan.findFirst({
+      where: {
+        id: planId,
+        userId,
+      },
+    })
+
+    if (!existingPlan) {
+      throw new AppError(404, 'Travel plan not found or access denied')
+    }
+
+    const updatedData: any = { ...updateData }
+
+    // Convert date strings to Date objects if provided
+    if (startDate) {
+      updatedData.startDate = new Date(startDate)
+    }
+    if (endDate) {
+      updatedData.endDate = new Date(endDate)
+    }
+
+    const travelPlan = await prisma.travelPlan.update({
+      where: { id: planId },
+      data: updatedData,
+      include: {
+        user: {
+          select: {
+            profile: {
+              select: {
+                fullName: true,
+                profileImage: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    return travelPlan
+  },
+
+  async toggleSaveTravelPlan(userId: string, travelPlanId: string) {
+    const existingSavedTravelPlan = await prisma.savedTravelPlan.findUnique({
+      where: {
+        userId_travelPlanId: {
+          userId,
+          travelPlanId,
+        },
+      },
+    })
+
+    if (existingSavedTravelPlan) {
+      await prisma.savedTravelPlan.delete({
+        where: {
+          userId_travelPlanId: {
+            userId,
+            travelPlanId,
+          },
+        },
+      })
+    } else {
+      await prisma.savedTravelPlan.create({
+        data: {
+          userId,
+          travelPlanId,
+        },
+      })
+    }
+    return !existingSavedTravelPlan // return true if liked, false if unliked
+  },
+
+  async deleteTravelPlan(planId: string, userId: string) {
+    // Check if plan exists and user owns it
+    const existingPlan = await prisma.travelPlan.findFirst({
+      where: {
+        id: planId,
+        userId,
+      },
+    })
+
+    if (!existingPlan) {
+      throw new AppError(404, 'Travel plan not found or access denied')
+    }
+
+    await prisma.travelPlan.delete({
+      where: { id: planId },
+    })
+
+    return { message: 'Travel plan deleted successfully' }
+  },
+
+  async searchTravelPlans(
+    filters: {
+      destination?: string
+      startDate?: string
+      endDate?: string
+      travelType?: string
+      interests?: string[]
+      sort?: 'upcoming' | 'most_recent'
+    },
+    page: number = 1,
+    limit: number = 10,
+    userId?: string
+  ) {
+    const skip = (page - 1) * limit
+
+    const where: any = {
+      isPublic: true,
+      startDate: { gte: new Date() }, // Only future plans
+    }
+    // require creator to have an active subscription (and not expired)
+    const now = new Date()
+    let userFilter: any = {
+      subscriptions: {
+        some: {
+          currentPeriodEnd: { gte: now },
+        },
+      },
+    }
+
+    if (filters.destination) {
+      where.destination = {
+        contains: filters.destination,
+        mode: 'insensitive',
+      }
+    }
+
+    if (filters.travelType) {
+      where.travelType = filters.travelType
+    }
+
+    if (filters.startDate && filters.endDate) {
+      where.OR = [
+        {
+          startDate: { lte: new Date(filters.endDate) },
+          endDate: { gte: new Date(filters.startDate) },
+        },
+      ]
+    }
+
+    if (filters.interests?.length) {
+      // combine interests filter with the subscription requirement
+      userFilter = {
+        AND: [
+          userFilter,
+          {
+            profile: {
+              travelInterests: {
+                hasSome: filters.interests,
+              },
+            },
+          },
+        ],
+      }
+    }
+
+    // attach the combined user filter to the main where clause
+    where.user = userFilter
+
+    let orderBy: any = { startDate: 'asc' } // default upcoming
+
+    if (filters.sort === 'most_recent') {
+      orderBy = { createdAt: 'desc' }
+    }
+
+    const include: any = {
+      user: {
+        select: {
+          id: true,
+          profile: {
+            select: {
+              fullName: true,
+              profileImage: true,
+              currentLocation: true,
+              travelInterests: true,
+            },
+          },
+          reviewsReceived: {
+            select: {
+              rating: true,
+            },
+          },
+        },
+      },
+      _count: {
+        select: {
+          matches: true,
+          savedTravelPlans: true,
+        },
+      },
+    }
+
+    if (userId) {
+      include.savedTravelPlans = { where: { userId }, select: { id: true } }
+    }
+
+    const [plans, total] = await Promise.all([
+      prisma.travelPlan.findMany({
+        where,
+        include,
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      prisma.travelPlan.count({ where }),
+    ])
+
+    // Calculate average ratings with safer access
+    const plansWithRatings = plans.map((plan: any) => {
+      const reviews = plan.user?.reviewsReceived || []
+      const ratings = reviews.map((r: any) => r.rating)
+      const averageRating =
+        ratings.length > 0
+          ? ratings.reduce((sum: number, rating: number) => sum + rating, 0) /
+            ratings.length
+          : 0
+
+      const { reviewsReceived, ...userWithoutReviews } = plan.user
+
+      const savedByMe = userId ? plan.savedTravelPlans.length > 0 : false
+
+      return {
+        ...plan,
+        savedByMe,
+        user: {
+          ...userWithoutReviews,
+          averageRating: Math.round(averageRating * 10) / 10,
+          reviewCount: ratings.length,
+        },
+      }
+    })
+
+    return {
+      plans: plansWithRatings,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    }
+  },
+}
