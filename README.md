@@ -1,5 +1,7 @@
 # TravelBuddy (Backend)
 
+## Live Link (Backend)
+- Live URL: https://b5a8-backend.onrender.com
 
 ## Project Overview
 Backend for TravelBuddy, providing role-based authentication, travel plan management, profile features, reviews, and Stripe payment support with webhook handling.
