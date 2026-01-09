@@ -43,21 +43,37 @@ app.use(morgan('combined'))
 app.set('trust proxy', 1)
 
 // CORS configuration
-const allowedOrigins = (process.env.CLIENT_URL || '')
-  .split(',')
-  .map(origin => origin.trim())
+// const allowedOrigins = (process.env.CLIENT_URL || '')
+//   .split(',')
+//   .map(origin => origin.trim())
+
+// app.use(
+//   cors({
+//     origin: process.env.CLIENT_URL, 
+  
+//     credentials: true,
+//   })
+// )
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://b5a8-frontend.vercel.app',
+]
+
+// Allow all preview deployments like: https://something.vercel.app
+const vercelPreviewRegex = /^https:\/\/.*\.vercel\.app$/
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
-    /* (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true)
-      } else {
-        callback(new Error('Not allowed by CORS'))
-      }
-    }, */
+    origin(origin, callback) {
+      // requests like curl/postman may have no origin
+      if (!origin) return callback(null, true)
+
+      const ok = allowedOrigins.includes(origin) || vercelPreviewRegex.test(origin)
+      return callback(ok ? null : new Error(`CORS blocked: ${origin}`), ok)
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 )
 
