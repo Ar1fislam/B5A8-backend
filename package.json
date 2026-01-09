@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun run --watch src/app.ts",
     "start": "bun run src/app.ts",
-    "build": "bun install",
+    "build": "bun install && bunx --bun prisma generate",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
